@@ -1,67 +1,49 @@
-"""
-Unit tests for the graph implementation and traversal.
-"""
+import os
+import pytest
+from graph import build_graph
+from nodes import llm
 
-import unittest
-from graph import Graph
-from traversal import traverse
+@pytest.fixture(scope="module")
+def graph():
+    return build_graph()
 
+@pytest.fixture(scope="module")
+def initial_state():
+    return {
+        "question": "What is the capital of France?",
+        "draft": "",
+        "critique": "",
+        "verdict": "",
+        "round": 1,
+        "max_rounds": 2,
+    }
 
-class TestGraph(unittest.TestCase):
-    def setUp(self):
-        self.g = Graph()
-        # Build a simple graph:
-        # 1 - 2
-        # |   |
-        # 3 - 4
-        self.g.add_edge(1, 2)
-        self.g.add_edge(2, 4)
-        self.g.add_edge(4, 3)
-        self.g.add_edge(3, 1)
+def test_draft_answer(graph, initial_state):
+    result = graph.invoke(initial_state)
+    assert result["draft"], "Draft should not be empty"
+    assert result["round"] >= 1, "Round should be at least 1"
 
-    def test_vertices_and_edges(self):
-        self.assertEqual(set(self.g.vertices()), {1, 2, 3, 4})
-        self.assertEqual(set(self.g.edges()), {(1, 2), (1, 3), (2, 4), (3, 4)})
+def test_reflection_and_rewrite(graph, initial_state):
+    # Run until END
+    result = graph.invoke(initial_state)
+    # After graph finishes, verdict should be either ok or needs_revision
+    assert result["verdict"] in ("ok", "needs_revision")
+    # If needs_revision, round should be <= max_rounds
+    if result["verdict"] == "needs_revision":
+        assert result["round"] <= result["max_rounds"]
+    # Draft should be updated
+    assert result["draft"], "Draft should be updated"
 
-    def test_reflexive_edges(self):
-        self.g.add_reflexive_edges()
-        for v in self.g.vertices():
-            self.assertIn(v, self.g.neighbors(v))
-
-    def test_has_edge(self):
-        self.assertTrue(self.g.has_edge(1, 2))
-        self.assertFalse(self.g.has_edge(1, 4))
-
-    def test_traverse_order(self):
-        order = traverse(1, self.g)
-        # Since we sort neighbors, the traversal order is deterministic
-        self.assertEqual(order, [1, 3, 4, 2])
-
-    def test_traverse_with_callback(self):
-        visited = []
-
-        def cb(v):
-            visited.append(v)
-
-        order = traverse(1, self.g, callback=cb)
-        self.assertEqual(order, visited)
-
-    def test_traverse_disconnected(self):
-        # Add a disconnected component
-        self.g.add_vertex(5)
-        self.g.add_edge(5, 6)
-        order = traverse(5, self.g)
-        self.assertEqual(set(order), {5, 6})
-
-    def test_traverse_self_loop(self):
-        self.g.add_edge(1, 1)  # self-loop
-        order = traverse(1, self.g)
-        self.assertEqual(order, [1, 3, 4, 2])  # self-loop does not affect order
-
-    def test_traverse_invalid_start(self):
-        with self.assertRaises(ValueError):
-            traverse(99, self.g)
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_max_rounds(graph):
+    state = {
+        "question": "Explain quantum mechanics.",
+        "draft": "",
+        "critique": "",
+        "verdict": "",
+        "round": 1,
+        "max_rounds": 1,
+    }
+    result = graph.invoke(state)
+    # Should stop after one round
+    assert result["round"] <= 1
+    assert result["verdict"] in ("ok", "needs_revision")
